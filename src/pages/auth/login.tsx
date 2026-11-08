@@ -2,6 +2,7 @@
 import React, { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import heroBg from '../../assets/bg-1.jpg'
+import { followRedirect, getRedirectTarget } from '../../lib/auth'
 
 const inputClass =
   'rounded-lg border border-gray-300 px-3 py-2 font-normal outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20'
@@ -83,14 +84,7 @@ const Login = () => {
       }
 
       await res.json().catch(() => ({}))
-      const redirectParam = new URLSearchParams(search).get('redirect_uri')
-      const redirectTarget = redirectParam && redirectParam !== 'null' ? redirectParam : '/profile'
-
-      if (redirectTarget.startsWith('http')) {
-        window.location.assign(redirectTarget)
-        return
-      }
-      navigate(redirectTarget, { replace: true })
+      followRedirect(getRedirectTarget(search), navigate)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
@@ -137,7 +131,7 @@ const Login = () => {
 
           {state?.registered && (
             <p role="status" className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-              Account created. Sign in, then verify your email from Profile → Security.
+              Account created. Sign in to verify your email.
             </p>
           )}
 

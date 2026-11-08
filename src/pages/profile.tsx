@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
-import './profile.css'
+import { requestVerificationCode } from '../lib/auth'
 
 type UserProfile = {
   id?: number
@@ -187,18 +187,8 @@ const Profile = () => {
     setVerificationError(null)
     setVerificationLoading(true)
     try {
-      const res = await fetch('/api/auth/verify-email', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-      })
-
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}))
-        throw new Error(payload.message ?? 'Could not send a verification code.')
-      }
-
-      navigate('/verify-email', { state: { email } })
+      await requestVerificationCode()
+      navigate('/verify-email', { state: { email, returnTo: '/profile#security' } })
     } catch (err) {
       setVerificationError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
@@ -459,8 +449,27 @@ const Profile = () => {
                       <div>
                         <dt>Email verification</dt>
                         <dd className="profile-inline">
-                          <StatusChip verified={verified} />
-                          {email && <span>{email}</span>}
+                          <span className="profile-inline-summary">
+                            <StatusChip verified={verified} />
+                            {email && <span>{email}</span>}
+                          </span>
+                          {!verified && (
+                            <span className="profile-inline-actions">
+                              <button
+                                type="button"
+                                className="profile-button is-primary"
+                                onClick={beginVerification}
+                                disabled={verificationLoading}
+                              >
+                                {verificationLoading ? 'Sending code…' : 'Verify email'}
+                              </button>
+                              {verificationError && (
+                                <span role="alert" className="profile-empty-value">
+                                  {verificationError}
+                                </span>
+                              )}
+                            </span>
+                          )}
                         </dd>
                       </div>
                       <div>
@@ -472,23 +481,6 @@ const Profile = () => {
                         <dd>{unavailable}</dd>
                       </div>
                     </dl>
-                    {!verified && (
-                      <div className="profile-state-actions">
-                        <button
-                          type="button"
-                          className="profile-button is-primary"
-                          onClick={beginVerification}
-                          disabled={verificationLoading}
-                        >
-                          {verificationLoading ? 'Sending code…' : 'Verify email'}
-                        </button>
-                        {verificationError && (
-                          <p role="alert" className="profile-empty-value">
-                            {verificationError}
-                          </p>
-                        )}
-                      </div>
-                    )}
                   </section>
 
                   <section className="profile-card" aria-labelledby="devices-title">

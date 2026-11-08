@@ -3,6 +3,7 @@ import React, { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import AuthLayout from '../../components/auth/layout'
 import BG from '../../assets/bg-2.jpg'
+import { getRedirectTarget, requestVerificationCode } from '../../lib/auth'
 
 type FormState = {
   fullName: string
@@ -121,9 +122,29 @@ const Signup = () => {
         return
       }
 
-      navigate(`/login${search}`, {
+      const email = form.email.trim()
+
+      try {
+        const loginRes = await fetch('/api/auth/login', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password: form.password }),
+        })
+        if (!loginRes.ok) throw new Error('Auto sign-in failed')
+
+        await requestVerificationCode()
+      } catch {
+        navigate(`/login${search}`, {
+          replace: true,
+          state: { registered: true, email },
+        })
+        return
+      }
+
+      navigate(`/verify-email${search}`, {
         replace: true,
-        state: { registered: true, email: form.email },
+        state: { email, returnTo: getRedirectTarget(search) },
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
@@ -132,7 +153,7 @@ const Signup = () => {
     }
   }
 
-  const clientName = 'something else'
+  const clientName = 'VendPro'
 
   return (
     <AuthLayout

@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import AuthLayout from '../../components/auth/layout'
 import BG from '../../assets/bg-2.jpg'
+import { followRedirect, getRedirectTarget } from '../../lib/auth'
 
 const CODE_LENGTH = 6
 const RESEND_SECONDS = 60
@@ -17,6 +18,7 @@ const VerifyEmail = () => {
   const navigate = useNavigate()
   const { search, state } = useLocation() // search keeps client_id, redirect_uri, etc.
   const email: string | undefined = state?.email
+  const returnTo: string = state?.returnTo ?? getRedirectTarget(search)
 
   const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(''))
   const [error, setError] = useState<string | null>(null)
@@ -74,14 +76,14 @@ const VerifyEmail = () => {
           )
         }
 
-        navigate('/profile#security', { replace: true })
+        followRedirect(returnTo, navigate)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Something went wrong.')
       } finally {
         setLoading(false)
       }
     },
-    [email, navigate]
+    [email, navigate, returnTo]
   )
 
   // Fill boxes starting at index i with the given characters
@@ -263,9 +265,18 @@ const VerifyEmail = () => {
           </div>
         </form>
 
-        <p className="text-center text-xs text-gray-500">
-          This code is tied to the account signed in in this browser.
-        </p>
+        <div className="flex flex-col items-center gap-2 text-center">
+          <button
+            type="button"
+            onClick={() => followRedirect(returnTo, navigate)}
+            className="text-sm font-medium text-gray-600 hover:underline"
+          >
+            I'll do this later
+          </button>
+          <p className="text-xs text-gray-500">
+            You can verify any time from Profile → Security.
+          </p>
+        </div>
       </div>
     </AuthLayout>
   )
