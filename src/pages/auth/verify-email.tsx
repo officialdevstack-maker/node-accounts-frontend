@@ -28,7 +28,7 @@ const VerifyEmail = () => {
   const [info, setInfo] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [resending, setResending] = useState(false)
-  const [cooldown, setCooldown] = useState(RESEND_SECONDS)
+  const [cooldown, setCooldown] = useState(state?.verificationSent === false ? 0 : RESEND_SECONDS)
 
   const inputs = useRef<Array<HTMLInputElement | null>>([])
 

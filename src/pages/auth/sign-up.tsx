@@ -125,10 +125,30 @@ const Signup = () => {
       }
 
       const email = form.email.trim()
-      toast.success('We sent a 6-digit code to your email.', { title: 'Account created' })
+      const payload: unknown = await res.json()
+      const codeSent =
+        typeof payload === 'object' &&
+        payload !== null &&
+        'data' in payload &&
+        typeof payload.data === 'object' &&
+        payload.data !== null &&
+        'verification' in payload.data &&
+        typeof payload.data.verification === 'object' &&
+        payload.data.verification !== null &&
+        'sent' in payload.data.verification &&
+        payload.data.verification.sent === true
+
+      if (codeSent) {
+        toast.success('We sent a 6-digit code to your email.', { title: 'Account created' })
+      } else {
+        toast.warning('Your account was created, but the code could not be sent. You can resend it from the verification screen.', {
+          title: 'Account created',
+        })
+      }
+
       navigate(`/verify-email${search}`, {
         replace: true,
-        state: { email, returnTo: getRedirectTarget(search) },
+        state: { email, returnTo: getRedirectTarget(search), verificationSent: codeSent },
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
