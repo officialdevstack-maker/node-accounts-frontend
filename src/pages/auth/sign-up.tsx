@@ -3,7 +3,8 @@ import React, { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import AuthLayout from '../../components/auth/layout'
 import BG from '../../assets/bg-2.jpg'
-import { getRedirectTarget, requestVerificationCode } from '../../lib/auth'
+import { getRedirectTarget } from '../../lib/auth'
+import { toast } from '../../lib/toast'
 
 type FormState = {
   fullName: string
@@ -99,6 +100,7 @@ const Signup = () => {
     try {
       const res = await fetch(`/api/auth/register`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fullname: form.fullName,
@@ -123,25 +125,7 @@ const Signup = () => {
       }
 
       const email = form.email.trim()
-
-      try {
-        const loginRes = await fetch('/api/auth/login', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password: form.password }),
-        })
-        if (!loginRes.ok) throw new Error('Auto sign-in failed')
-
-        await requestVerificationCode()
-      } catch {
-        navigate(`/login${search}`, {
-          replace: true,
-          state: { registered: true, email },
-        })
-        return
-      }
-
+      toast.success('We sent a 6-digit code to your email.', { title: 'Account created' })
       navigate(`/verify-email${search}`, {
         replace: true,
         state: { email, returnTo: getRedirectTarget(search) },

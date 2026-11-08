@@ -9,6 +9,7 @@ type UserProfile = {
   email?: string
   phone?: string | null
   isVerified?: boolean
+  accountType?: string
   account_type?: string
 }
 
@@ -234,7 +235,7 @@ const Profile = () => {
   const firstName = displayName.split(/\s+/)[0]
   const email = user.email?.trim() || ''
   const phone = user.phone?.trim() || ''
-  const accountType = user.account_type || 'Standard'
+  const accountType = user.accountType || user.account_type || 'Standard'
   const verified = Boolean(user.isVerified)
   const initials =
     displayName

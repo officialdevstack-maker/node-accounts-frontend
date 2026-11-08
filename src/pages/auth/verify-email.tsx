@@ -4,6 +4,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import AuthLayout from '../../components/auth/layout'
 import BG from '../../assets/bg-2.jpg'
 import { followRedirect, getRedirectTarget } from '../../lib/auth'
+import { toast } from '../../lib/toast'
 
 const CODE_LENGTH = 6
 const RESEND_SECONDS = 60
@@ -17,7 +18,9 @@ const maskEmail = (email: string) => {
 const VerifyEmail = () => {
   const navigate = useNavigate()
   const { search, state } = useLocation() // search keeps client_id, redirect_uri, etc.
-  const email: string | undefined = state?.email
+  const [email, setEmail] = useState<string | undefined>(state?.email)
+  const [resolving, setResolving] = useState(!state?.email)
+  const [resolveError, setResolveError] = useState<string | null>(null)
   const returnTo: string = state?.returnTo ?? getRedirectTarget(search)
 
   const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(''))
@@ -28,6 +31,45 @@ const VerifyEmail = () => {
   const [cooldown, setCooldown] = useState(RESEND_SECONDS)
 
   const inputs = useRef<Array<HTMLInputElement | null>>([])
+
+  useEffect(() => {
+    if (email) return
+    let alive = true
+
+    const loadProfile = async () => {
+      try {
+        const res = await fetch('/api/auth/profile', {
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        })
+        if (res.status === 401) return
+        if (!res.ok) throw new Error('Could not load your account.')
+
+        const payload = await res.json()
+        const user = payload?.data ?? payload
+        if (!alive) return
+        if (user?.isVerified) {
+          navigate('/profile#security', { replace: true })
+          return
+        }
+        if (typeof user?.email !== 'string') {
+          throw new Error('Your account profile did not include an email address.')
+        }
+        setEmail(user.email)
+      } catch (err) {
+        if (alive) {
+          setResolveError(err instanceof Error ? err.message : 'Could not load your account.')
+        }
+      } finally {
+        if (alive) setResolving(false)
+      }
+    }
+
+    void loadProfile()
+    return () => {
+      alive = false
+    }
+  }, [email, navigate])
 
   // Resend countdown
   useEffect(() => {
@@ -76,6 +118,7 @@ const VerifyEmail = () => {
           )
         }
 
+        toast.success('Your email address is now confirmed.', { title: 'Email verified' })
         followRedirect(returnTo, navigate)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Something went wrong.')
@@ -166,9 +209,28 @@ const VerifyEmail = () => {
         throw new Error(data.message ?? 'Could not resend the code. Try again.')
       }
 
-      setInfo('A new code has been sent.')
+      const payload: unknown = await res.json()
+      if (
+        typeof payload !== 'object' ||
+        payload === null ||
+        !('data' in payload) ||
+        typeof payload.data !== 'object' ||
+        payload.data === null ||
+        !('sent' in payload.data) ||
+        typeof payload.data.sent !== 'boolean' ||
+        !('retryAfter' in payload.data) ||
+        typeof payload.data.retryAfter !== 'number'
+      ) {
+        throw new Error('The server returned an invalid resend response.')
+      }
+
+      setInfo(
+        payload.data.sent
+          ? 'A new code has been sent.'
+          : 'A code was sent recently. Check your inbox.'
+      )
       setDigits(Array(CODE_LENGTH).fill(''))
-      setCooldown(RESEND_SECONDS)
+      setCooldown(Math.max(0, payload.data.retryAfter))
       focusAt(0)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
@@ -177,7 +239,28 @@ const VerifyEmail = () => {
     }
   }
 
-  // Landed here directly with no email context, so send them back
+  if (resolving) {
+    return (
+      <div role="status" className="grid min-h-screen place-items-center text-sm text-gray-500">
+        Loading…
+      </div>
+    )
+  }
+
+  if (resolveError) {
+    return (
+      <AuthLayout
+        image={BG}
+        heroTitle={<>Verify your email.<br />Almost there.</>}
+        heroText="We sent a 6-digit code to your inbox. Enter it to confirm your Spurs account."
+      >
+        <div role="alert" className="card p-8 text-sm text-red-600">
+          {resolveError}
+        </div>
+      </AuthLayout>
+    )
+  }
+
   if (!email) {
     return <Navigate to={`/login${search}`} replace />
   }
