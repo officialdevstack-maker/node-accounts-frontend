@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme{
+    --bg-primary: #ead312;
+}
+
+.container {
+    @apply m-3;
+}
+
+.card {
+    @apply bg-white rounded-lg shadow-md;
+}
+
+.card-header {
+    @apply p-2;
+}
+
+/* src/components/Hero.css */
+.login-hero {
+  background-image: url("./assets/bg-1.jpg");
+  background-size: cover;
+  background-position: center;
+}
