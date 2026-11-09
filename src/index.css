@@ -770,3 +770,61 @@
     margin-left: 0;
   }
 }
+
+/* ---------- Devices ---------- */
+.profile-button:disabled { opacity: 0.6; cursor: not-allowed; }
+.profile-button.is-small { height: 36px; padding: 0 16px; font-size: 13px; }
+
+.profile-device-state {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 20px 24px 24px; color: var(--profile-muted);
+  border-top: 1px solid var(--profile-line);
+}
+
+.profile-device-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 24px;
+  border-top: 1px solid var(--profile-line);
+  background: var(--profile-surface-variant);
+  color: var(--profile-muted);
+}
+
+.profile-device-list { display: grid; }
+
+.profile-device {
+  position: relative;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: 16px; padding: 18px 24px;
+  border-top: 1px solid var(--profile-line);
+}
+.profile-device:first-child { border-top: 0; }
+.profile-device-toolbar + .profile-device-list .profile-device:first-child { border-top: 0; }
+
+.profile-device.is-current {
+  background: color-mix(in srgb, var(--profile-primary) 7%, transparent);
+}
+.profile-device.is-current::before {
+  content: ''; position: absolute; inset: 12px auto 12px 0; width: 4px;
+  border-radius: 0 4px 4px 0; background: var(--profile-primary);
+}
+
+.profile-device-icon {
+  display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%;
+  background: var(--profile-primary-container); color: var(--profile-on-primary-container);
+}
+
+.profile-device-main { min-width: 0; display: grid; gap: 2px; }
+.profile-device-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.profile-device-row strong { font-size: 16px; font-weight: 500; line-height: 24px; overflow-wrap: anywhere; }
+.profile-device-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
+  color: var(--profile-faint); font-size: 13px; line-height: 20px;
+}
+.profile-device-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+@media (max-width: 640px) {
+  .profile-device { grid-template-columns: auto minmax(0, 1fr); padding: 16px 20px; }
+  .profile-device-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .profile-device-toolbar { padding: 12px 20px; }
+  .profile-device-state { padding: 16px 20px 20px; }
+}
