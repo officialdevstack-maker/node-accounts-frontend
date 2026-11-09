@@ -34,7 +34,10 @@ const Login = () => {
   const BRAND = 'Spurs'
   const clientName = 'VendPro'
 
-  const [form, setForm] = useState({ email: '', password: '' })
+  const [form, setForm] = useState(() => ({
+    email: new URLSearchParams(search).get('login_hint') ?? '',
+    password: '',
+  }))
   const [errors, setErrors] = useState<Record<string, string | undefined>>({})
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
