@@ -257,6 +257,11 @@ const Profile = () => {
   const [activityError, setActivityError] = useState<string | null>(null)
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityReloadKey, setActivityReloadKey] = useState(0)
+  const [connectedApps, setConnectedApps] = useState<ConnectedApp[] | null>(null)
+  const [connectedAppsError, setConnectedAppsError] = useState<string | null>(null)
+  const [connectedAppsLoading, setConnectedAppsLoading] = useState(false)
+  const [connectedAppsReloadKey, setConnectedAppsReloadKey] = useState(0)
+  const [revokingAppId, setRevokingAppId] = useState<number | null>(null)
   const [exporting, setExporting] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletePassword, setDeletePassword] = useState('')
@@ -420,6 +425,44 @@ const Profile = () => {
     }
   }, [activityReloadKey, navigate, view])
 
+  useEffect(() => {
+    if (view !== 'apps') return
+    let alive = true
+
+    const loadConnectedApps = async () => {
+      setConnectedAppsLoading(true)
+      setConnectedAppsError(null)
+      try {
+        const res = await fetch('/api/auth/connected-apps', {
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        })
+        if (res.status === 401) {
+          navigate('/login', { replace: true })
+          return
+        }
+        if (!res.ok) throw new Error('Could not load your connected apps.')
+
+        const payload = await res.json()
+        const apps = Array.isArray(payload?.data)
+          ? (payload.data as ConnectedApp[])
+          : Array.isArray(payload)
+            ? (payload as ConnectedApp[])
+            : []
+        if (alive) setConnectedApps(apps)
+      } catch (err) {
+        if (alive) setConnectedAppsError(err instanceof Error ? err.message : 'Something went wrong.')
+      } finally {
+        if (alive) setConnectedAppsLoading(false)
+      }
+    }
+
+    void loadConnectedApps()
+    return () => {
+      alive = false
+    }
+  }, [connectedAppsReloadKey, navigate, view])
+
   const toggleTheme = () => {
     const next: Theme = theme === 'dark' ? 'light' : 'dark'
     setTheme(next)
@@ -440,6 +483,33 @@ const Profile = () => {
     setDevices(null)
     setDevicesError(null)
     setDeviceReloadKey((n) => n + 1)
+  }
+
+  const revokeApp = async (app: ConnectedApp) => {
+    setRevokingAppId(app.id)
+    try {
+      const res = await fetch(`/api/auth/connected-apps/${app.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      })
+
+      if (res.status === 401) {
+        navigate('/login', { replace: true })
+        return
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.message ?? 'Could not remove that app.')
+      }
+
+      setConnectedApps((apps) => apps?.filter((item) => item.id !== app.id) ?? null)
+      toast.success(`${app.name} has been disconnected.`, { title: 'App removed' })
+    } catch (err) {
+      setConnectedAppsError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setRevokingAppId(null)
+    }
   }
 
   const updatePreference = async (key: keyof Preferences, value: boolean) => {
@@ -1815,12 +1885,91 @@ const Profile = () => {
             {view === 'apps' && (
               <>
                 {pageHead('Connected apps', 'Apps that have access to your account.')}
-                <section className="profile-card profile-empty">
-                  <span className="profile-tile-icon is-large">
-                    <Icon name="apps" />
-                  </span>
-                  <h2>Nothing to manage yet</h2>
-                  <p>Connected apps and access controls aren’t available for this account yet.</p>
+                <section className="profile-card">
+                  <div className="profile-card-head">
+                    <h2>Applications with account access</h2>
+                    <p>Review what each app can access and disconnect it at any time.</p>
+                  </div>
+
+                  {connectedAppsError ? (
+                    <div className="profile-device-state" role="alert">
+                      <span>{connectedAppsError}</span>
+                      <button
+                        type="button"
+                        className="profile-button is-small"
+                        onClick={() => setConnectedAppsReloadKey((n) => n + 1)}
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  ) : connectedAppsLoading || connectedApps === null ? (
+                    <div className="profile-device-state" role="status">Loading connected apps…</div>
+                  ) : connectedApps.length === 0 ? (
+                    <div className="profile-card profile-empty">
+                      <span className="profile-tile-icon is-large">
+                        <Icon name="apps" />
+                      </span>
+                      <h2>No connected apps</h2>
+                      <p>You have not granted access to any third-party apps yet.</p>
+                    </div>
+                  ) : (
+                    <div className="profile-device-list">
+                      {connectedApps.map((app) => (
+                        <div key={app.id} className="profile-device">
+                          <div className="profile-device-icon">
+                            {app.logoUri ? (
+                              <img
+                                src={app.logoUri}
+                                alt=""
+                                className="h-10 w-10 rounded-lg object-cover"
+                              />
+                            ) : (
+                              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100 text-sm font-semibold text-blue-700">
+                                {app.name.slice(0, 1).toUpperCase()}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="profile-device-main">
+                            <div className="profile-device-row">
+                              <strong>{app.name}</strong>
+                              <span className="profile-chip is-good">
+                                {app.type === 'first_party' ? 'First party' : 'Third party'}
+                              </span>
+                            </div>
+                            <div className="profile-device-meta">
+                              <span>{app.description || 'No description provided.'}</span>
+                            </div>
+                            <div className="profile-device-meta">
+                              <span>{app.permissions.length ? app.permissions.join(', ') : 'No extra permissions'}</span>
+                            </div>
+                            <div className="profile-device-meta">
+                              <span>
+                                Connected {app.connectedAt ? formatDate(app.connectedAt) : 'recently'}
+                              </span>
+                              {app.lastUsedAt && (
+                                <>
+                                  <span>•</span>
+                                  <span>Last used {timeAgo(app.lastUsedAt)}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="profile-device-actions">
+                            <button
+                              type="button"
+                              className="profile-button is-small"
+                              onClick={() => void revokeApp(app)}
+                              disabled={revokingAppId === app.id}
+                            >
+                              {revokingAppId === app.id ? 'Removing…' : 'Disconnect'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
               </>
             )}
