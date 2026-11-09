@@ -1,14 +1,19 @@
 import type { NavigateFunction } from 'react-router-dom'
 
-/** Where to send the user once auth is done: ?redirect_uri=... or the profile. */
+/** Where to send the user once auth is done: ?return_to=/path (in-site only) or ?redirect_uri=... or the profile. */
 export const getRedirectTarget = (search: string, fallback = '/profile') => {
-  const param = new URLSearchParams(search).get('redirect_uri')
+  const params = new URLSearchParams(search)
+
+  const returnTo = params.get('return_to')
+  if (returnTo && /^\/(?![/\\])/.test(returnTo)) return returnTo
+
+  const param = params.get('redirect_uri')
   return param && param !== 'null' ? param : fallback
 }
 
-/** Full URLs leave the app, in-app paths use the router. */
+/** Full URLs and /api/ paths (the OIDC authorize endpoint) must be a real browser navigation, not a router one. */
 export const followRedirect = (target: string, navigate: NavigateFunction) => {
-  if (target.startsWith('http')) {
+  if (target.startsWith('http') || target.startsWith('/api/')) {
     window.location.assign(target)
     return
   }

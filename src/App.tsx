@@ -3,8 +3,10 @@ import Login from './pages/auth/login'
 import Signup from './pages/auth/sign-up'
 import ForgotPassword from './pages/auth/forgot-password'
 import ResetPassword from './pages/auth/reset-password'
-import NotFound from './pages/not-found'
 import VerifyEmail from './pages/auth/verify-email'
+import Consent from './pages/oauth/consent'
+import OAuthError from './pages/oauth/error'
+import NotFound from './pages/not-found'
 import Profile from './pages/profile'
 import Toaster from './components/toast/toaster'
 import { toastRef } from './lib/toast'
@@ -19,6 +21,8 @@ const App = () => {
         <Route path="/verify-email" element={<VerifyEmail />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/consent" element={<Consent />} />
+        <Route path="/oauth/error" element={<OAuthError />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

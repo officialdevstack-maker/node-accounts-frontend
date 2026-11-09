@@ -41,6 +41,17 @@ type ActivityItem = {
   createdAt: string
 }
 
+type ConnectedApp = {
+  id: number
+  name: string
+  description: string | null
+  logoUri: string | null
+  type: 'first_party' | 'third_party'
+  permissions: string[]
+  connectedAt: string | null
+  lastUsedAt: string | null
+}
+
 const EVENT_LABELS: Record<string, string> = {
   login: 'Signed in',
   login_failed: 'Failed sign-in attempt',
@@ -50,6 +61,8 @@ const EVENT_LABELS: Record<string, string> = {
   password_reset: 'Password reset',
   email_verified: 'Email verified',
   device_revoked: 'Device signed out',
+  app_connected: 'App connected',
+  app_revoked: 'App access removed',
   profile_updated: 'Profile updated',
   avatar_updated: 'Profile photo changed',
   avatar_removed: 'Profile photo removed',
