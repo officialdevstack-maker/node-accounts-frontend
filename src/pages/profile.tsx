@@ -16,7 +16,58 @@ type UserProfile = {
 
 type Theme = 'light' | 'dark'
 
+type Device = {
+  id: number
+  deviceName: string
+  ipAddress: string | null
+  lastUsedAt: string | null
+  signedInAt: string
+  expiresAt: string | null
+  current: boolean
+}
+
 const THEME_KEY = 'profile-theme'
+
+const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
+const DEVICE_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+  ['year', 31_536_000],
+  ['month', 2_592_000],
+  ['day', 86_400],
+  ['hour', 3_600],
+  ['minute', 60],
+]
+
+const timeAgo = (iso: string) => {
+  const seconds = Math.round((new Date(iso).getTime() - Date.now()) / 1000)
+  const abs = Math.abs(seconds)
+
+  for (const [unit, size] of DEVICE_UNITS) {
+    if (abs >= size) return rtf.format(Math.round(seconds / size), unit)
+  }
+
+  return 'just now'
+}
+
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-NG', { dateStyle: 'medium' })
+
+const isPhone = (name: string) => /iOS|Android/i.test(name)
+
+const DeviceIcon = ({ phone }: { phone: boolean }) => (
+  <svg className="profile-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    {phone ? (
+      <>
+        <rect x="7" y="3" width="10" height="18" rx="2.5" />
+        <path d="M11 18h2" />
+      </>
+    ) : (
+      <>
+        <rect x="3" y="5" width="18" height="12" rx="2" />
+        <path d="M8 21h8M12 17v4" />
+      </>
+    )}
+  </svg>
+)
 
 const views = [
   { id: 'overview', label: 'Home', icon: 'home' },
@@ -126,6 +177,12 @@ const Profile = () => {
   const [passwordFieldErrors, setPasswordFieldErrors] = useState<Record<string, string>>({})
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null)
   const [passwordLoading, setPasswordLoading] = useState(false)
+  const [devices, setDevices] = useState<Device[] | null>(null)
+  const [devicesError, setDevicesError] = useState<string | null>(null)
+  const [devicesLoading, setDevicesLoading] = useState(false)
+  const [deviceBusyId, setDeviceBusyId] = useState<number | null>(null)
+  const [confirmOthers, setConfirmOthers] = useState(false)
+  const [deviceReloadKey, setDeviceReloadKey] = useState(0)
   const [attempt, setAttempt] = useState(0)
   const [theme, setTheme] = useState<Theme>(readInitialTheme)
   const [view, setView] = useState<ViewId>(readViewFromHash)
@@ -179,6 +236,46 @@ const Profile = () => {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
+  useEffect(() => {
+    if (view !== 'security') return
+
+    let alive = true
+
+    const loadDevices = async () => {
+      setDevicesLoading(true)
+      setDevicesError(null)
+      try {
+        const res = await fetch('/api/auth/devices', {
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        })
+
+        if (!res.ok) {
+          if (res.status === 401) {
+            navigate('/login', { replace: true })
+            return
+          }
+          throw new Error('Could not load your devices.')
+        }
+
+        const payload = await res.json()
+        const list = Array.isArray(payload?.data) ? (payload.data as Device[]) : []
+        if (!alive) return
+        setDevices(list)
+      } catch (err) {
+        if (!alive) return
+        setDevicesError(err instanceof Error ? err.message : 'Something went wrong.')
+      } finally {
+        if (alive) setDevicesLoading(false)
+      }
+    }
+
+    void loadDevices()
+    return () => {
+      alive = false
+    }
+  }, [deviceReloadKey, navigate, view])
+
   const toggleTheme = () => {
     const next: Theme = theme === 'dark' ? 'light' : 'dark'
     setTheme(next)
@@ -193,6 +290,91 @@ const Profile = () => {
     setError(null)
     setLoading(true)
     setAttempt((n) => n + 1)
+  }
+
+  const reloadDevices = () => {
+    setDevices(null)
+    setDevicesError(null)
+    setDeviceReloadKey((n) => n + 1)
+  }
+
+  const revokeDevice = async (device: Device) => {
+    setDeviceBusyId(device.id)
+    try {
+      const res = await fetch(`/api/auth/devices/${device.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      })
+
+      if (res.status === 401) {
+        navigate('/login', { replace: true })
+        return
+      }
+      if (res.status === 404) {
+        reloadDevices()
+        return
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.message ?? 'Could not sign out that device.')
+      }
+
+      setDevices((list) => list?.filter((item) => item.id !== device.id) ?? null)
+      toast.success(`${device.deviceName} was signed out.`, { title: 'Device signed out' })
+    } catch (err) {
+      setDevicesError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setDeviceBusyId(null)
+    }
+  }
+
+  const revokeOthers = async () => {
+    setDeviceBusyId(-1)
+    try {
+      const res = await fetch('/api/auth/devices/logout-others', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      })
+
+      if (res.status === 401) {
+        navigate('/login', { replace: true })
+        return
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.message ?? 'Could not sign out your other devices.')
+      }
+
+      setDevices((list) => list?.filter((item) => item.current) ?? null)
+      setConfirmOthers(false)
+      toast.success('You were signed out of all other devices.', { title: 'Devices signed out' })
+    } catch (err) {
+      setDevicesError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setDeviceBusyId(null)
+    }
+  }
+
+  const signOutHere = async () => {
+    setDeviceBusyId(-2)
+    try {
+      const res = await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      })
+
+      if (!res.ok && res.status !== 401) {
+        throw new Error('Could not sign you out. Try again.')
+      }
+
+      navigate('/login', { replace: true })
+    } catch (err) {
+      setDevicesError(err instanceof Error ? err.message : 'Something went wrong.')
+      setDeviceBusyId(null)
+    }
   }
 
   const beginVerification = async () => {
@@ -684,13 +866,131 @@ const Profile = () => {
                   <section className="profile-card" aria-labelledby="devices-title">
                     <div className="profile-card-head">
                       <h2 id="devices-title">Your devices</h2>
+                      <p>Where your account is signed in right now. Sign out of any device you don’t recognise.</p>
                     </div>
-                    <dl className="profile-rows">
-                      <div>
-                        <dt>Signed-in devices</dt>
-                        <dd>{unavailable}</dd>
+
+                    {devicesError ? (
+                      <div className="profile-device-state" role="alert">
+                        <span>{devicesError}</span>
+                        <button type="button" className="profile-button is-small" onClick={reloadDevices}>
+                          Try again
+                        </button>
                       </div>
-                    </dl>
+                    ) : devices === null && devicesLoading ? (
+                      <div className="profile-device-state" role="status">
+                        Loading devices…
+                      </div>
+                    ) : devices === null ? (
+                      <div className="profile-device-state" role="status">
+                        No devices found.
+                      </div>
+                    ) : (() => {
+                        const sorted = [...devices].sort(
+                          (a, b) => Number(b.current) - Number(a.current),
+                        )
+                        const others = sorted.filter((device) => !device.current)
+
+                        return (
+                          <>
+                            {others.length > 0 && (
+                              <div className="profile-device-toolbar">
+                                {confirmOthers ? (
+                                  <>
+                                    <span>
+                                      Sign out {others.length} other {others.length === 1 ? 'device' : 'devices'}?
+                                    </span>
+                                    <div className="profile-device-actions">
+                                      <button
+                                        type="button"
+                                        className="profile-button is-small"
+                                        onClick={() => setConfirmOthers(false)}
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="profile-button is-primary is-small"
+                                        onClick={() => void revokeOthers()}
+                                        disabled={deviceBusyId !== null}
+                                      >
+                                        {deviceBusyId === -1 ? 'Signing out…' : 'Sign out all others'}
+                                      </button>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="profile-button is-primary is-small"
+                                    onClick={() => setConfirmOthers(true)}
+                                  >
+                                    Sign out all others
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            <div className="profile-device-list">
+                              {sorted.map((device) => (
+                                <div
+                                  key={device.id}
+                                  className={`profile-device ${device.current ? 'is-current' : ''}`}
+                                >
+                                  <div className="profile-device-icon">
+                                    <DeviceIcon phone={isPhone(device.deviceName)} />
+                                  </div>
+
+                                  <div className="profile-device-main">
+                                    <div className="profile-device-row">
+                                      <strong>{device.deviceName || 'Unknown device'}</strong>
+                                      {device.current && (
+                                        <span className="profile-chip is-good">Current</span>
+                                      )}
+                                    </div>
+                                    <div className="profile-device-meta">
+                                      <span>{device.ipAddress || 'Unknown location'}</span>
+                                      <span>•</span>
+                                      <span>
+                                        {device.lastUsedAt ? `Last used ${timeAgo(device.lastUsedAt)}` : 'Recently used'}
+                                      </span>
+                                    </div>
+                                    <div className="profile-device-meta">
+                                      <span>Signed in {formatDate(device.signedInAt)}</span>
+                                      {device.expiresAt && (
+                                        <>
+                                          <span>•</span>
+                                          <span>Expires {formatDate(device.expiresAt)}</span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="profile-device-actions">
+                                    {device.current ? (
+                                      <button
+                                        type="button"
+                                        className="profile-button is-small"
+                                        onClick={() => void signOutHere()}
+                                        disabled={deviceBusyId !== null}
+                                      >
+                                        {deviceBusyId === -2 ? 'Signing out…' : 'Sign out'}
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="profile-button is-small"
+                                        onClick={() => void revokeDevice(device)}
+                                        disabled={deviceBusyId === device.id}
+                                      >
+                                        {deviceBusyId === device.id ? 'Signing out…' : 'Sign out'}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )
+                      })()}
                   </section>
                 </div>
               </>

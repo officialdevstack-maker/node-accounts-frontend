@@ -637,6 +637,103 @@
   line-height: 24px;
 }
 
+.profile-device-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px 24px;
+  color: var(--profile-muted);
+}
+
+.profile-device-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--profile-line);
+  color: var(--profile-muted);
+}
+
+.profile-device-list {
+  display: grid;
+  gap: 12px;
+  padding: 16px 24px 24px;
+}
+
+.profile-device {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid var(--profile-line);
+  border-radius: 16px;
+  background: var(--profile-surface-variant);
+}
+
+.profile-device.is-current {
+  border-color: rgba(11, 87, 208, 0.35);
+  background: rgba(11, 87, 208, 0.04);
+}
+
+.profile-device-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--profile-primary-container);
+  color: var(--profile-on-primary-container);
+}
+
+.profile-device-main {
+  min-width: 0;
+}
+
+.profile-device-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.profile-device-row strong {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.profile-device-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--profile-faint);
+  font-size: 13px;
+}
+
+.profile-device-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.profile-button.is-small {
+  height: 36px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+.profile-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* ---------- Tablet / mobile ---------- */
 
 @media (max-width: 900px) {
