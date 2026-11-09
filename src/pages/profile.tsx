@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { requestVerificationCode } from '../lib/auth'
+import { AVATAR_MAX_BYTES, AVATAR_TYPES, toSquareJpeg } from '../lib/avatar'
 import { toast } from '../lib/toast'
 
 type UserProfile = {
@@ -12,6 +13,7 @@ type UserProfile = {
   isVerified?: boolean
   accountType?: string
   account_type?: string
+  avatarUrl?: string | null
 }
 
 type Theme = 'light' | 'dark'
@@ -48,6 +50,9 @@ const EVENT_LABELS: Record<string, string> = {
   password_reset: 'Password reset',
   email_verified: 'Email verified',
   device_revoked: 'Device signed out',
+  profile_updated: 'Profile updated',
+  avatar_updated: 'Profile photo changed',
+  avatar_removed: 'Profile photo removed',
 }
 
 const THEME_KEY = 'profile-theme'
@@ -201,6 +206,7 @@ const readViewFromHash = (): ViewId => {
 const Profile = () => {
   const navigate = useNavigate()
   const mainRef = useRef<HTMLElement>(null)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
   const [user, setUser] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -216,6 +222,13 @@ const Profile = () => {
   const [passwordFieldErrors, setPasswordFieldErrors] = useState<Record<string, string>>({})
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null)
   const [passwordLoading, setPasswordLoading] = useState(false)
+  const [editingProfile, setEditingProfile] = useState(false)
+  const [profileForm, setProfileForm] = useState({ fullname: '', phone: '' })
+  const [profileFieldErrors, setProfileFieldErrors] = useState<Record<string, string>>({})
+  const [profileError, setProfileError] = useState<string | null>(null)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [avatarBusy, setAvatarBusy] = useState(false)
+  const [avatarError, setAvatarError] = useState<string | null>(null)
   const [devices, setDevices] = useState<Device[] | null>(null)
   const [devicesError, setDevicesError] = useState<string | null>(null)
   const [devicesLoading, setDevicesLoading] = useState(false)
@@ -539,6 +552,171 @@ const Profile = () => {
     }
   }
 
+  const startEditingProfile = () => {
+    setProfileForm({
+      fullname: (user?.fullname || user?.name || '').trim(),
+      phone: user?.phone?.trim() || '',
+    })
+    setProfileFieldErrors({})
+    setProfileError(null)
+    setEditingProfile(true)
+  }
+
+  const cancelEditingProfile = () => {
+    setEditingProfile(false)
+    setProfileFieldErrors({})
+    setProfileError(null)
+  }
+
+  const handleProfileSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setProfileError(null)
+    setProfileFieldErrors({})
+
+    const fullname = profileForm.fullname.trim().replace(/\s+/g, ' ')
+    const phone = profileForm.phone.trim()
+    const clientErrors: Record<string, string> = {}
+    if (fullname.split(' ').filter(Boolean).length < 2) {
+      clientErrors.fullname = 'Enter your first and last name.'
+    }
+    if (fullname.length > 120) {
+      clientErrors.fullname = 'Name must be 120 characters or fewer.'
+    }
+    if (!/^\+?[0-9\s-]{7,20}$/.test(phone)) {
+      clientErrors.phone = 'Enter a valid phone number.'
+    }
+    if (Object.keys(clientErrors).length) {
+      setProfileFieldErrors(clientErrors)
+      return
+    }
+
+    if (fullname === (user?.fullname || '').trim() && phone === (user?.phone || '').trim()) {
+      setEditingProfile(false)
+      return
+    }
+
+    setProfileSaving(true)
+    try {
+      const res = await fetch('/api/auth/profile', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ fullname, phone }),
+      })
+
+      if (res.status === 401) {
+        navigate('/login', { replace: true })
+        return
+      }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        const rawErrors = (data?.errors ?? {}) as Record<string, unknown>
+        const fromApi: Record<string, string> = {}
+
+        for (const [key, value] of Object.entries(rawErrors)) {
+          const msg = Array.isArray(value) ? value[0] : value
+          if (typeof msg === 'string') fromApi[key] = msg
+        }
+
+        if (Object.keys(fromApi).length) {
+          setProfileFieldErrors(fromApi)
+          setProfileError('Please fix the highlighted fields.')
+          return
+        }
+        throw new Error(data.message ?? 'Could not update your profile.')
+      }
+
+      const payload = await res.json()
+      if (!payload?.data) throw new Error('Could not update your profile.')
+      setUser(payload.data as UserProfile)
+      setEditingProfile(false)
+      setActivityReloadKey((n) => n + 1)
+      toast.success('Your details have been saved.', { title: 'Profile updated' })
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setProfileSaving(false)
+    }
+  }
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+
+    setAvatarError(null)
+    if (!AVATAR_TYPES.includes(file.type)) {
+      setAvatarError('Choose a PNG, JPEG or WebP image.')
+      return
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      setAvatarError('That image is larger than 5 MB.')
+      return
+    }
+
+    setAvatarBusy(true)
+    try {
+      const blob = await toSquareJpeg(file)
+      const res = await fetch('/api/auth/avatar', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'image/jpeg', Accept: 'application/json' },
+        body: blob,
+      })
+
+      if (res.status === 401) {
+        navigate('/login', { replace: true })
+        return
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.message ?? 'Could not upload your photo.')
+      }
+
+      const payload = await res.json()
+      if (!payload?.data) throw new Error('Could not upload your photo.')
+      setUser((prev) => ({ ...prev, ...payload.data }))
+      setActivityReloadKey((n) => n + 1)
+      toast.success('Your profile photo has been updated.', { title: 'Photo updated' })
+    } catch (err) {
+      setAvatarError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
+
+  const handleAvatarRemove = async () => {
+    setAvatarError(null)
+    setAvatarBusy(true)
+    try {
+      const res = await fetch('/api/auth/avatar', {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      })
+
+      if (res.status === 401) {
+        navigate('/login', { replace: true })
+        return
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.message ?? 'Could not remove your photo.')
+      }
+
+      const payload = await res.json()
+      if (!payload?.data) throw new Error('Could not remove your photo.')
+      setUser((prev) => ({ ...prev, ...payload.data }))
+      setActivityReloadKey((n) => n + 1)
+      toast.success('Your profile photo has been removed.', { title: 'Photo removed' })
+    } catch (err) {
+      setAvatarError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
+
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault()
     setPasswordError(null)
@@ -643,8 +821,10 @@ const Profile = () => {
   const firstName = displayName.split(/\s+/)[0]
   const email = user.email?.trim() || ''
   const phone = user.phone?.trim() || ''
-  const accountType = user.accountType || user.account_type || 'Standard'
+  const accountTypeValue = user.accountType || user.account_type || 'Standard'
+  const accountType = accountTypeValue === 'user' ? 'Standard' : accountTypeValue
   const verified = Boolean(user.isVerified)
+  const avatarUrl = user.avatarUrl || null
   const initials =
     displayName
       .split(/\s+/)
@@ -695,7 +875,7 @@ const Profile = () => {
         </button>
 
         <span className="profile-avatar-small" title={displayName}>
-          <span aria-hidden="true">{initials}</span>
+          {avatarUrl ? <img src={avatarUrl} alt="" /> : <span aria-hidden="true">{initials}</span>}
           <span className="profile-sr">{displayName}</span>
         </span>
       </header>
@@ -720,7 +900,7 @@ const Profile = () => {
               <>
                 <header className="profile-hero">
                   <div className="profile-avatar-large" aria-hidden="true">
-                    {initials}
+                    {avatarUrl ? <img src={avatarUrl} alt="" /> : initials}
                   </div>
                   <h1>Welcome, {firstName}</h1>
                   <p>Review your account details and keep your account secure.</p>
@@ -818,30 +998,166 @@ const Profile = () => {
               <>
                 {pageHead(
                   'Personal info',
-                  'The details saved on your account. Editing isn’t available yet.',
+                  'Update your name and phone number. Your email and account type can’t be changed here.',
                 )}
                 <section className="profile-card" aria-labelledby="basic-title">
-                  <div className="profile-card-head">
+                  <div className="profile-card-head has-action">
                     <h2 id="basic-title">Basic info</h2>
+                    {!editingProfile && (
+                      <button
+                        type="button"
+                        className="profile-button is-small"
+                        onClick={startEditingProfile}
+                      >
+                        Edit
+                      </button>
+                    )}
                   </div>
-                  <dl className="profile-rows">
-                    <div>
-                      <dt>Name</dt>
-                      <dd>{fullName || notProvided}</dd>
+                  <div className="profile-avatar-edit">
+                    <div className="profile-avatar-preview">
+                      {avatarUrl ? (
+                        <img src={avatarUrl} alt="Your profile photo" />
+                      ) : (
+                        <span aria-hidden="true">{initials}</span>
+                      )}
                     </div>
-                    <div>
-                      <dt>Email</dt>
-                      <dd>{email || notProvided}</dd>
+
+                    <div className="profile-avatar-actions">
+                      <input
+                        ref={avatarInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        className="profile-sr"
+                        tabIndex={-1}
+                        onChange={(e) => void handleAvatarChange(e)}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="profile-button is-small"
+                          onClick={() => avatarInputRef.current?.click()}
+                          disabled={avatarBusy}
+                        >
+                          {avatarBusy ? 'Working…' : avatarUrl ? 'Change photo' : 'Upload photo'}
+                        </button>
+                        {avatarUrl && (
+                          <button
+                            type="button"
+                            className="profile-button is-small"
+                            onClick={() => void handleAvatarRemove()}
+                            disabled={avatarBusy}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <span className="profile-empty-value">
+                        PNG, JPEG or WebP, up to 5 MB. It’s cropped to a square.
+                      </span>
+                      {avatarError && (
+                        <span role="alert" className="text-xs font-normal text-red-600">
+                          {avatarError}
+                        </span>
+                      )}
                     </div>
-                    <div>
-                      <dt>Phone</dt>
-                      <dd>{phone || notProvided}</dd>
-                    </div>
-                    <div>
-                      <dt>Account type</dt>
-                      <dd className="profile-capitalize">{accountType}</dd>
-                    </div>
-                  </dl>
+                  </div>
+                  {editingProfile ? (
+                    <form onSubmit={handleProfileSave} noValidate className="profile-form">
+                      <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+                        Full name
+                        <input
+                          type="text"
+                          autoComplete="name"
+                          autoFocus
+                          value={profileForm.fullname}
+                          onChange={(e) => {
+                            setProfileForm((prev) => ({ ...prev, fullname: e.target.value }))
+                            if (profileFieldErrors.fullname) {
+                              setProfileFieldErrors((prev) => ({ ...prev, fullname: '' }))
+                            }
+                          }}
+                          aria-invalid={!!profileFieldErrors.fullname}
+                          className={`rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 ${profileFieldErrors.fullname ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : ''}`.trim()}
+                        />
+                        {profileFieldErrors.fullname && (
+                          <span role="alert" className="text-xs font-normal text-red-600">
+                            {profileFieldErrors.fullname}
+                          </span>
+                        )}
+                      </label>
+
+                      <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+                        Phone number
+                        <input
+                          type="tel"
+                          autoComplete="tel"
+                          placeholder="0801 234 5678"
+                          value={profileForm.phone}
+                          onChange={(e) => {
+                            setProfileForm((prev) => ({ ...prev, phone: e.target.value }))
+                            if (profileFieldErrors.phone) {
+                              setProfileFieldErrors((prev) => ({ ...prev, phone: '' }))
+                            }
+                          }}
+                          aria-invalid={!!profileFieldErrors.phone}
+                          className={`rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 ${profileFieldErrors.phone ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : ''}`.trim()}
+                        />
+                        {profileFieldErrors.phone && (
+                          <span role="alert" className="text-xs font-normal text-red-600">
+                            {profileFieldErrors.phone}
+                          </span>
+                        )}
+                      </label>
+
+                      <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+                        Email
+                        <span className="profile-empty-value">{email} · can’t be changed here</span>
+                      </div>
+
+                      {profileError && (
+                        <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+                          {profileError}
+                        </p>
+                      )}
+
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          className="profile-button"
+                          onClick={cancelEditingProfile}
+                          disabled={profileSaving}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="profile-button is-primary"
+                          disabled={profileSaving}
+                        >
+                          {profileSaving ? 'Saving…' : 'Save changes'}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <dl className="profile-rows">
+                      <div>
+                        <dt>Name</dt>
+                        <dd>{fullName || notProvided}</dd>
+                      </div>
+                      <div>
+                        <dt>Email</dt>
+                        <dd>{email || notProvided}</dd>
+                      </div>
+                      <div>
+                        <dt>Phone</dt>
+                        <dd>{phone || notProvided}</dd>
+                      </div>
+                      <div>
+                        <dt>Account type</dt>
+                        <dd className="profile-capitalize">{accountType}</dd>
+                      </div>
+                    </dl>
+                  )}
                 </section>
               </>
             )}
@@ -1015,7 +1331,8 @@ const Profile = () => {
 
                   <section className="profile-card" aria-labelledby="alerts-title">
                     <div className="profile-card-head">
-                      <h2 id="alerts-title">Sign-in alerts</h2>
+                      <h2 id="alerts-title">Preferences</h2>
+                      <h3 className="profile-pref-heading">Sign-in alerts</h3>
                       <p>Get an email when someone signs in to your account.</p>
                     </div>
 
