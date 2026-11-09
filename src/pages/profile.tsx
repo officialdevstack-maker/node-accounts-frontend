@@ -26,7 +26,43 @@ type Device = {
   current: boolean
 }
 
+type Preferences = {
+  newDeviceAlerts: boolean
+  loginAlerts: boolean
+}
+
+type ActivityItem = {
+  id: number
+  event: string
+  ipAddress: string | null
+  deviceName: string | null
+  createdAt: string
+}
+
+const EVENT_LABELS: Record<string, string> = {
+  login: 'Signed in',
+  login_failed: 'Failed sign-in attempt',
+  logout: 'Signed out',
+  logout_all: 'Signed out of all devices',
+  password_changed: 'Password changed',
+  password_reset: 'Password reset',
+  email_verified: 'Email verified',
+  device_revoked: 'Device signed out',
+}
+
 const THEME_KEY = 'profile-theme'
+const PREF_FIELDS = {
+  newDeviceAlerts: 'new_device_alerts',
+  loginAlerts: 'login_alerts',
+} as const
+
+const isPreferences = (value: unknown): value is Preferences =>
+  typeof value === 'object' &&
+  value !== null &&
+  'newDeviceAlerts' in value &&
+  typeof value.newDeviceAlerts === 'boolean' &&
+  'loginAlerts' in value &&
+  typeof value.loginAlerts === 'boolean'
 
 const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
 const DEVICE_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
@@ -50,6 +86,9 @@ const timeAgo = (iso: string) => {
 
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString('en-NG', { dateStyle: 'medium' })
+
+const formatDateTime = (iso: string) =>
+  new Date(iso).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })
 
 const isPhone = (name: string) => /iOS|Android/i.test(name)
 
@@ -183,6 +222,14 @@ const Profile = () => {
   const [deviceBusyId, setDeviceBusyId] = useState<number | null>(null)
   const [confirmOthers, setConfirmOthers] = useState(false)
   const [deviceReloadKey, setDeviceReloadKey] = useState(0)
+  const [prefs, setPrefs] = useState<Preferences | null>(null)
+  const [prefsError, setPrefsError] = useState<string | null>(null)
+  const [prefsSaving, setPrefsSaving] = useState<keyof Preferences | null>(null)
+  const [prefsReloadKey, setPrefsReloadKey] = useState(0)
+  const [activity, setActivity] = useState<ActivityItem[] | null>(null)
+  const [activityError, setActivityError] = useState<string | null>(null)
+  const [activityLoading, setActivityLoading] = useState(false)
+  const [activityReloadKey, setActivityReloadKey] = useState(0)
   const [attempt, setAttempt] = useState(0)
   const [theme, setTheme] = useState<Theme>(readInitialTheme)
   const [view, setView] = useState<ViewId>(readViewFromHash)
@@ -276,6 +323,71 @@ const Profile = () => {
     }
   }, [deviceReloadKey, navigate, view])
 
+  useEffect(() => {
+    if (view !== 'security') return
+    let alive = true
+
+    const loadPrefs = async () => {
+      setPrefsError(null)
+      try {
+        const res = await fetch('/api/auth/preferences', {
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        })
+        if (res.status === 401) {
+          navigate('/login', { replace: true })
+          return
+        }
+        if (!res.ok) throw new Error('Could not load your alert settings.')
+
+        const payload = await res.json()
+        if (!isPreferences(payload?.data)) throw new Error('Could not load your alert settings.')
+        if (alive) setPrefs(payload.data)
+      } catch (err) {
+        if (alive) setPrefsError(err instanceof Error ? err.message : 'Something went wrong.')
+      }
+    }
+
+    void loadPrefs()
+    return () => {
+      alive = false
+    }
+  }, [prefsReloadKey, navigate, view])
+
+  useEffect(() => {
+    if (view !== 'privacy') return
+    let alive = true
+
+    const loadActivity = async () => {
+      setActivityLoading(true)
+      setActivityError(null)
+      try {
+        const res = await fetch('/api/auth/activity?per_page=10', {
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        })
+        if (res.status === 401) {
+          navigate('/login', { replace: true })
+          return
+        }
+        if (!res.ok) throw new Error('Could not load your activity.')
+
+        const payload = await res.json()
+        if (!alive) return
+        setActivity(Array.isArray(payload?.data) ? (payload.data as ActivityItem[]) : [])
+      } catch (err) {
+        if (alive) setActivityError(err instanceof Error ? err.message : 'Something went wrong.')
+      } finally {
+        if (alive) setActivityLoading(false)
+      }
+    }
+
+    void loadActivity()
+    return () => {
+      alive = false
+    }
+  }, [activityReloadKey, navigate, view])
+
   const toggleTheme = () => {
     const next: Theme = theme === 'dark' ? 'light' : 'dark'
     setTheme(next)
@@ -296,6 +408,43 @@ const Profile = () => {
     setDevices(null)
     setDevicesError(null)
     setDeviceReloadKey((n) => n + 1)
+  }
+
+  const updatePreference = async (key: keyof Preferences, value: boolean) => {
+    if (!prefs || prefsSaving) return
+    const previous = prefs
+    setPrefs({ ...prefs, [key]: value })
+    setPrefsSaving(key)
+
+    try {
+      const res = await fetch('/api/auth/preferences', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ [PREF_FIELDS[key]]: value }),
+      })
+
+      if (res.status === 401) {
+        navigate('/login', { replace: true })
+        return
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.message ?? 'Could not save your setting.')
+      }
+
+      const payload = await res.json()
+      if (!isPreferences(payload?.data)) throw new Error('Could not save your setting.')
+      setPrefs(payload.data)
+      toast.success(value ? 'Alert turned on.' : 'Alert turned off.', { title: 'Settings saved' })
+    } catch (err) {
+      setPrefs(previous)
+      toast.error(err instanceof Error ? err.message : 'Something went wrong.', {
+        title: 'Not saved',
+      })
+    } finally {
+      setPrefsSaving(null)
+    }
   }
 
   const revokeDevice = async (device: Device) => {
@@ -447,6 +596,7 @@ const Profile = () => {
       setPasswordError(null)
       setPasswordSuccess('Your password has been updated.')
       setChangePasswordOpen(false)
+      setActivityReloadKey((n) => n + 1)
       toast.success('Your password has been updated.', { title: 'Password changed' })
     } catch (err) {
       setPasswordError(err instanceof Error ? err.message : 'Something went wrong.')
@@ -863,6 +1013,67 @@ const Profile = () => {
                     </section>
                   )}
 
+                  <section className="profile-card" aria-labelledby="alerts-title">
+                    <div className="profile-card-head">
+                      <h2 id="alerts-title">Sign-in alerts</h2>
+                      <p>Get an email when someone signs in to your account.</p>
+                    </div>
+
+                    {prefsError ? (
+                      <div className="profile-device-state" role="alert">
+                        <span>{prefsError}</span>
+                        <button
+                          type="button"
+                          className="profile-button is-small"
+                          onClick={() => setPrefsReloadKey((n) => n + 1)}
+                        >
+                          Try again
+                        </button>
+                      </div>
+                    ) : prefs === null ? (
+                      <div className="profile-device-state" role="status">Loading settings…</div>
+                    ) : (
+                      <>
+                        <label className="profile-pref">
+                          <span className="profile-pref-text">
+                            <strong>Every sign-in</strong>
+                            <span>Email me each time my account is signed in to.</span>
+                          </span>
+                          <span className="profile-switch">
+                            <input
+                              type="checkbox"
+                              role="switch"
+                              checked={prefs.loginAlerts}
+                              disabled={prefsSaving !== null}
+                              onChange={(e) => void updatePreference('loginAlerts', e.target.checked)}
+                            />
+                            <span className="profile-switch-track" aria-hidden="true" />
+                          </span>
+                        </label>
+
+                        <label className="profile-pref">
+                          <span className="profile-pref-text">
+                            <strong>New devices only</strong>
+                            <span>
+                              Email me when a sign-in comes from a device I haven’t used before.
+                              {prefs.loginAlerts && ' Already covered by “Every sign-in”.'}
+                            </span>
+                          </span>
+                          <span className="profile-switch">
+                            <input
+                              type="checkbox"
+                              role="switch"
+                              checked={prefs.newDeviceAlerts}
+                              disabled={prefsSaving !== null}
+                              onChange={(e) => void updatePreference('newDeviceAlerts', e.target.checked)}
+                            />
+                            <span className="profile-switch-track" aria-hidden="true" />
+                          </span>
+                        </label>
+                      </>
+                    )}
+                  </section>
+
                   <section className="profile-card" aria-labelledby="devices-title">
                     <div className="profile-card-head">
                       <h2 id="devices-title">Your devices</h2>
@@ -1026,11 +1237,46 @@ const Profile = () => {
                         <dt>Privacy preferences</dt>
                         <dd>{unavailable}</dd>
                       </div>
-                      <div>
-                        <dt>Activity history</dt>
-                        <dd>{unavailable}</dd>
-                      </div>
                     </dl>
+                  </section>
+
+                  <section className="profile-card" aria-labelledby="activity-title">
+                    <div className="profile-card-head">
+                      <h2 id="activity-title">Recent activity</h2>
+                      <p>Sign-ins and security changes on your account.</p>
+                    </div>
+
+                    {activityError ? (
+                      <div className="profile-device-state" role="alert">
+                        <span>{activityError}</span>
+                        <button
+                          type="button"
+                          className="profile-button is-small"
+                          onClick={() => setActivityReloadKey((n) => n + 1)}
+                        >
+                          Try again
+                        </button>
+                      </div>
+                    ) : activity === null || activityLoading ? (
+                      <div className="profile-device-state" role="status">Loading activity…</div>
+                    ) : activity.length === 0 ? (
+                      <div className="profile-device-state" role="status">No activity yet.</div>
+                    ) : (
+                      <dl className="profile-rows">
+                        {activity.map((item) => (
+                          <div key={item.id}>
+                            <dt>{formatDateTime(item.createdAt)}</dt>
+                            <dd>
+                              {EVENT_LABELS[item.event] ?? item.event}
+                              <span className="profile-empty-value">
+                                {' · '}
+                                {[item.deviceName, item.ipAddress].filter(Boolean).join(' · ') || 'Unknown device'}
+                              </span>
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    )}
                   </section>
                 </div>
               </>
