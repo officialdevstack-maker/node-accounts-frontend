@@ -8,6 +8,7 @@ import Consent from './pages/oauth/consent'
 import OAuthError from './pages/oauth/error'
 import NotFound from './pages/not-found'
 import Profile from './pages/profile'
+import InfoPage from './pages/info'
 import Toaster from './components/toast/toaster'
 import { toastRef } from './lib/toast'
 
@@ -24,6 +25,9 @@ const App = () => {
         <Route path="/consent" element={<Consent />} />
         <Route path="/oauth/error" element={<OAuthError />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/terms" element={<InfoPage page="terms" />} />
+        <Route path="/privacy" element={<InfoPage page="privacy" />} />
+        <Route path="/help" element={<InfoPage page="help" />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
 

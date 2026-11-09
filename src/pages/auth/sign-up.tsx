@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import AuthLayout from '../../components/auth/layout'
 import BG from '../../assets/bg-2.jpg'
 import { getRedirectTarget } from '../../lib/auth'
+import { useClientInfo } from '../../lib/useClientInfo'
 import { toast } from '../../lib/toast'
 
 type FormState = {
@@ -55,6 +56,7 @@ const FieldError = ({ message }: { message?: string }) =>
 const Signup = () => {
   const navigate = useNavigate()
   const { search } = useLocation() // keeps client_id, redirect_uri, etc.
+  const { name: clientName } = useClientInfo(search)
 
   const [form, setForm] = useState<FormState>({
     fullName: '',
@@ -156,8 +158,6 @@ const Signup = () => {
       setLoading(false)
     }
   }
-
-  const clientName = 'VendPro'
 
   return (
     <AuthLayout

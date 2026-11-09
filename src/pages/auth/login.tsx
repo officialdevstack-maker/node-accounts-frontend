@@ -3,6 +3,7 @@ import React, { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import heroBg from '../../assets/bg-1.jpg'
 import { followRedirect, getRedirectTarget } from '../../lib/auth'
+import { useClientInfo } from '../../lib/useClientInfo'
 
 const inputClass =
   'rounded-lg border border-gray-300 px-3 py-2 font-normal outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20'
@@ -32,7 +33,7 @@ const Login = () => {
   const navigate = useNavigate()
   const { search, state } = useLocation()
   const BRAND = 'Spurs'
-  const clientName = 'VendPro'
+  const { name: clientName } = useClientInfo(search)
 
   const [form, setForm] = useState(() => ({
     email: new URLSearchParams(search).get('login_hint') ?? '',
