@@ -5,12 +5,12 @@ type ClientInfo = {
   logoUri: string | null
 }
 
-function clientIdFromSearch(search: string): string | null {
+export function clientIdFromSearch(search: string, origin = 'http://localhost'): string | null {
   const returnTo = new URLSearchParams(search).get('return_to')
   if (!returnTo) return null
 
   try {
-    const authorizeUrl = new URL(returnTo, window.location.origin)
+    const authorizeUrl = new URL(returnTo, origin)
     if (!authorizeUrl.pathname.endsWith('/authorize')) return null
     return authorizeUrl.searchParams.get('client_id')?.trim() || null
   } catch {
@@ -19,11 +19,10 @@ function clientIdFromSearch(search: string): string | null {
 }
 
 export function useClientInfo(search: string): ClientInfo {
-  const [clientInfo, setClientInfo] = useState<ClientInfo>({ name: 'Spurs', logoUri: null })
+  const [loadedClient, setLoadedClient] = useState<{ search: string; info: ClientInfo } | null>(null)
 
   useEffect(() => {
-    const clientId = clientIdFromSearch(search)
-    setClientInfo({ name: 'Spurs', logoUri: null })
+    const clientId = clientIdFromSearch(search, window.location.origin)
     if (!clientId) return
 
     const controller = new AbortController()
@@ -46,9 +45,12 @@ export function useClientInfo(search: string): ClientInfo {
           typeof data.name === 'string' &&
           data.name.trim()
         ) {
-          setClientInfo({
-            name: data.name,
-            logoUri: 'logoUri' in data && typeof data.logoUri === 'string' ? data.logoUri : null,
+          setLoadedClient({
+            search,
+            info: {
+              name: data.name,
+              logoUri: 'logoUri' in data && typeof data.logoUri === 'string' ? data.logoUri : null,
+            },
           })
         }
       } catch (error) {
@@ -65,5 +67,5 @@ export function useClientInfo(search: string): ClientInfo {
     }
   }, [search])
 
-  return clientInfo
+  return loadedClient?.search === search ? loadedClient.info : { name: 'Spurs', logoUri: null }
 }
