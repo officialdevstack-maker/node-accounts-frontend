@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { requestVerificationCode } from '../lib/auth'
+import { toast } from '../lib/toast'
 
 type UserProfile = {
   id?: number
@@ -115,6 +116,16 @@ const Profile = () => {
   const [error, setError] = useState<string | null>(null)
   const [verificationLoading, setVerificationLoading] = useState(false)
   const [verificationError, setVerificationError] = useState<string | null>(null)
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false)
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    password: '',
+    passwordConfirmation: '',
+  })
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [passwordFieldErrors, setPasswordFieldErrors] = useState<Record<string, string>>({})
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null)
+  const [passwordLoading, setPasswordLoading] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [theme, setTheme] = useState<Theme>(readInitialTheme)
   const [view, setView] = useState<ViewId>(readViewFromHash)
@@ -194,6 +205,71 @@ const Profile = () => {
       setVerificationError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
       setVerificationLoading(false)
+    }
+  }
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPasswordError(null)
+    setPasswordFieldErrors({})
+
+    if (!passwordForm.currentPassword) {
+      setPasswordFieldErrors({ current_password: 'Enter your current password.' })
+      return
+    }
+
+    if (passwordForm.password.length < 8) {
+      setPasswordFieldErrors({ password: 'Password must be at least 8 characters.' })
+      return
+    }
+
+    if (passwordForm.password !== passwordForm.passwordConfirmation) {
+      setPasswordFieldErrors({ password_confirmation: 'Passwords do not match.' })
+      return
+    }
+
+    setPasswordLoading(true)
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_password: passwordForm.currentPassword,
+          password: passwordForm.password,
+          password_confirmation: passwordForm.passwordConfirmation,
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        const rawErrors = (data?.errors ?? {}) as Record<string, unknown>
+        const fieldErrorsFromApi: Record<string, string> = {}
+
+        for (const [key, value] of Object.entries(rawErrors)) {
+          const msg = Array.isArray(value) ? value[0] : value
+          if (typeof msg === 'string') fieldErrorsFromApi[key] = msg
+        }
+
+        if (Object.keys(fieldErrorsFromApi).length) {
+          setPasswordFieldErrors(fieldErrorsFromApi)
+          setPasswordError('Please fix the highlighted fields.')
+          return
+        }
+
+        throw new Error(data.message ?? 'Could not update your password.')
+      }
+
+      setPasswordForm({ currentPassword: '', password: '', passwordConfirmation: '' })
+      setPasswordFieldErrors({})
+      setPasswordError(null)
+      setPasswordSuccess('Your password has been updated.')
+      setChangePasswordOpen(false)
+      toast.success('Your password has been updated.', { title: 'Password changed' })
+    } catch (err) {
+      setPasswordError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setPasswordLoading(false)
     }
   }
 
@@ -475,7 +551,24 @@ const Profile = () => {
                       </div>
                       <div>
                         <dt>Password</dt>
-                        <dd>{unavailable}</dd>
+                        <dd className="profile-inline">
+                          <span className="profile-inline-summary">
+                            <span className="profile-empty-value">••••••••</span>
+                          </span>
+                          <span className="profile-inline-actions">
+                            <button
+                              type="button"
+                              className="profile-button is-primary"
+                              onClick={() => {
+                                setPasswordError(null)
+                                setPasswordSuccess(null)
+                                setChangePasswordOpen((open) => !open)
+                              }}
+                            >
+                              {changePasswordOpen ? 'Close' : 'Change password'}
+                            </button>
+                          </span>
+                        </dd>
                       </div>
                       <div>
                         <dt>Two-step verification</dt>
@@ -483,6 +576,110 @@ const Profile = () => {
                       </div>
                     </dl>
                   </section>
+
+                  {changePasswordOpen && (
+                    <section className="profile-card" aria-labelledby="password-title">
+                      <div className="profile-card-head">
+                        <h2 id="password-title">Change password</h2>
+                      </div>
+
+                      <form onSubmit={handlePasswordChange} className="profile-stack">
+                        <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+                          Current password
+                          <input
+                            type="password"
+                            autoComplete="current-password"
+                            value={passwordForm.currentPassword}
+                            onChange={(e) => {
+                              setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))
+                              if (passwordFieldErrors.current_password) {
+                                setPasswordFieldErrors((prev) => ({ ...prev, current_password: '' }))
+                              }
+                            }}
+                            aria-invalid={!!passwordFieldErrors.current_password}
+                            className={`rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 ${passwordFieldErrors.current_password ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : ''}`.trim()}
+                          />
+                          {passwordFieldErrors.current_password && (
+                            <span role="alert" className="text-xs font-normal text-red-600">
+                              {passwordFieldErrors.current_password}
+                            </span>
+                          )}
+                        </label>
+
+                        <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+                          New password
+                          <input
+                            type="password"
+                            autoComplete="new-password"
+                            value={passwordForm.password}
+                            onChange={(e) => {
+                              setPasswordForm((prev) => ({ ...prev, password: e.target.value }))
+                              if (passwordFieldErrors.password) {
+                                setPasswordFieldErrors((prev) => ({ ...prev, password: '' }))
+                              }
+                            }}
+                            aria-invalid={!!passwordFieldErrors.password}
+                            className={`rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 ${passwordFieldErrors.password ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : ''}`.trim()}
+                          />
+                          {passwordFieldErrors.password && (
+                            <span role="alert" className="text-xs font-normal text-red-600">
+                              {passwordFieldErrors.password}
+                            </span>
+                          )}
+                        </label>
+
+                        <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+                          Confirm new password
+                          <input
+                            type="password"
+                            autoComplete="new-password"
+                            value={passwordForm.passwordConfirmation}
+                            onChange={(e) => {
+                              setPasswordForm((prev) => ({
+                                ...prev,
+                                passwordConfirmation: e.target.value,
+                              }))
+                              if (passwordFieldErrors.password_confirmation) {
+                                setPasswordFieldErrors((prev) => ({
+                                  ...prev,
+                                  password_confirmation: '',
+                                }))
+                              }
+                            }}
+                            aria-invalid={!!passwordFieldErrors.password_confirmation}
+                            className={`rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 ${passwordFieldErrors.password_confirmation ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : ''}`.trim()}
+                          />
+                          {passwordFieldErrors.password_confirmation && (
+                            <span role="alert" className="text-xs font-normal text-red-600">
+                              {passwordFieldErrors.password_confirmation}
+                            </span>
+                          )}
+                        </label>
+
+                        {passwordError && (
+                          <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+                            {passwordError}
+                          </p>
+                        )}
+
+                        {passwordSuccess && (
+                          <p role="status" className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                            {passwordSuccess}
+                          </p>
+                        )}
+
+                        <div className="flex justify-end">
+                          <button
+                            type="submit"
+                            disabled={passwordLoading}
+                            className="profile-button is-primary"
+                          >
+                            {passwordLoading ? 'Updating…' : 'Update password'}
+                          </button>
+                        </div>
+                      </form>
+                    </section>
+                  )}
 
                   <section className="profile-card" aria-labelledby="devices-title">
                     <div className="profile-card-head">
