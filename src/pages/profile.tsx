@@ -53,6 +53,7 @@ const EVENT_LABELS: Record<string, string> = {
   profile_updated: 'Profile updated',
   avatar_updated: 'Profile photo changed',
   avatar_removed: 'Profile photo removed',
+  data_exported: 'Account data downloaded',
 }
 
 const THEME_KEY = 'profile-theme'
@@ -243,6 +244,11 @@ const Profile = () => {
   const [activityError, setActivityError] = useState<string | null>(null)
   const [activityLoading, setActivityLoading] = useState(false)
   const [activityReloadKey, setActivityReloadKey] = useState(0)
+  const [exporting, setExporting] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deletePassword, setDeletePassword] = useState('')
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [theme, setTheme] = useState<Theme>(readInitialTheme)
   const [view, setView] = useState<ViewId>(readViewFromHash)
@@ -714,6 +720,88 @@ const Profile = () => {
       setAvatarError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
       setAvatarBusy(false)
+    }
+  }
+
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const res = await fetch('/api/auth/privacy/export', {
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      })
+
+      if (res.status === 401) {
+        navigate('/login', { replace: true })
+        return
+      }
+      if (!res.ok) throw new Error('Could not prepare your data. Try again.')
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'spurs-account-data.json'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+
+      setActivityReloadKey((n) => n + 1)
+      toast.success('Your data file has been downloaded.', { title: 'Download ready' })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Something went wrong.', {
+        title: 'Download failed',
+      })
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const closeDelete = () => {
+    setDeleteOpen(false)
+    setDeletePassword('')
+    setDeleteError(null)
+  }
+
+  const handleDeleteAccount = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setDeleteError(null)
+
+    if (!deletePassword) {
+      setDeleteError('Enter your password to confirm.')
+      return
+    }
+
+    setDeleting(true)
+    try {
+      const res = await fetch('/api/auth/delete-account', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ password: deletePassword }),
+      })
+
+      if (res.status === 401) {
+        navigate('/login', { replace: true })
+        return
+      }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        const raw = data?.errors?.password
+        const msg = Array.isArray(raw) ? raw[0] : raw
+        throw new Error(
+          typeof msg === 'string' ? msg : (data.message ?? 'Could not delete your account.'),
+        )
+      }
+
+      toast.success('Your account has been deleted.', { title: 'Account deleted' })
+      navigate('/login', { replace: true })
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -1548,14 +1636,126 @@ const Profile = () => {
                   <section className="profile-card" aria-labelledby="controls-title">
                     <div className="profile-card-head">
                       <h2 id="controls-title">Privacy controls</h2>
+                      <p>Take a copy of your data, manage sign-in alerts, or close your account.</p>
                     </div>
                     <dl className="profile-rows">
                       <div>
-                        <dt>Privacy preferences</dt>
-                        <dd>{unavailable}</dd>
+                        <dt>Download your data</dt>
+                        <dd className="profile-inline">
+                          <span className="profile-inline-summary">
+                            <span className="profile-empty-value">
+                              A JSON file with your profile, preferences, devices and activity.
+                            </span>
+                          </span>
+                          <span className="profile-inline-actions">
+                            <button
+                              type="button"
+                              className="profile-button is-small"
+                              onClick={() => void handleExport()}
+                              disabled={exporting}
+                            >
+                              {exporting ? 'Preparing…' : 'Download'}
+                            </button>
+                          </span>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Sign-in alerts</dt>
+                        <dd className="profile-inline">
+                          <span className="profile-inline-summary">
+                            <span className="profile-empty-value">
+                              Choose when we email you about sign-ins.
+                            </span>
+                          </span>
+                          <span className="profile-inline-actions">
+                            <button
+                              type="button"
+                              className="profile-button is-small"
+                              onClick={() => {
+                                window.location.hash = 'security'
+                              }}
+                            >
+                              Manage
+                            </button>
+                          </span>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Delete account</dt>
+                        <dd className="profile-inline">
+                          <span className="profile-inline-summary">
+                            <span className="profile-empty-value">
+                              Permanently remove your account and its data.
+                            </span>
+                          </span>
+                          <span className="profile-inline-actions">
+                            <button
+                              type="button"
+                              className="profile-button is-danger is-small"
+                              onClick={() => (deleteOpen ? closeDelete() : setDeleteOpen(true))}
+                            >
+                              {deleteOpen ? 'Cancel' : 'Delete account'}
+                            </button>
+                          </span>
+                        </dd>
                       </div>
                     </dl>
                   </section>
+
+                  {deleteOpen && (
+                    <section className="profile-card" aria-labelledby="delete-title">
+                      <div className="profile-card-head">
+                        <h2 id="delete-title">Delete your account</h2>
+                        <p>
+                          This permanently deletes your profile, photo, devices and activity, and
+                          signs you out everywhere. It can’t be undone. Download your data first if
+                          you want a copy.
+                        </p>
+                      </div>
+
+                      <form onSubmit={handleDeleteAccount} noValidate className="profile-form">
+                        <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+                          Confirm with your password
+                          <input
+                            type="password"
+                            autoComplete="current-password"
+                            autoFocus
+                            value={deletePassword}
+                            onChange={(e) => {
+                              setDeletePassword(e.target.value)
+                              if (deleteError) setDeleteError(null)
+                            }}
+                            aria-invalid={!!deleteError}
+                            className={`rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 ${deleteError ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : ''}`.trim()}
+                          />
+                        </label>
+
+                        {deleteError && (
+                          <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+                            {deleteError}
+                          </p>
+                        )}
+
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            className="profile-button"
+                            onClick={closeDelete}
+                            disabled={deleting}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="profile-button is-danger is-primary"
+                            disabled={deleting}
+                          >
+                            {deleting ? 'Deleting…' : 'Delete permanently'}
+                          </button>
+                        </div>
+                      </form>
+                    </section>
+                  )}
 
                   <section className="profile-card" aria-labelledby="activity-title">
                     <div className="profile-card-head">

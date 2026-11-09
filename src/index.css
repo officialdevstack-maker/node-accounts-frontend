@@ -210,6 +210,17 @@
   height: 32px;
 }
 
+.profile-button.is-danger {
+  border-color: var(--profile-error);
+  color: var(--profile-error);
+}
+
+.profile-button.is-danger.is-primary {
+  border-color: transparent;
+  background: var(--profile-error);
+  color: var(--profile-bg);
+}
+
 .profile-shell {
   min-height: 100vh;
   min-height: 100dvh;
