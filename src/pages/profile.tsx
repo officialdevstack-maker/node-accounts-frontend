@@ -16,6 +16,17 @@ type UserProfile = {
   avatarUrl?: string | null
 }
 
+type KycProfile = {
+  status: 'pending' | 'verified' | 'rejected'
+  bvnMasked: string
+  fullName: string
+  dateOfBirth: string
+  phone: string
+  rejectionReason: string | null
+  submittedAt: string
+  reviewedAt: string | null
+}
+
 type Theme = 'light' | 'dark'
 
 type Device = {
@@ -130,6 +141,7 @@ const DeviceIcon = ({ phone }: { phone: boolean }) => (
 const views = [
   { id: 'overview', label: 'Home', icon: 'home' },
   { id: 'personal', label: 'Personal info', icon: 'person' },
+  { id: 'identity', label: 'Identity verification', icon: 'identity' },
   { id: 'security', label: 'Security', icon: 'security' },
   { id: 'privacy', label: 'Data & privacy', icon: 'privacy' },
   { id: 'apps', label: 'Connected apps', icon: 'apps' },
@@ -151,6 +163,13 @@ const iconPaths: Record<IconName, ReactNode> = {
     <>
       <circle cx="12" cy="8" r="4" />
       <path d="M4.5 20c.6-3.6 3.8-6 7.5-6s6.9 2.4 7.5 6" />
+    </>
+  ),
+  identity: (
+    <>
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <circle cx="9" cy="11" r="2" />
+      <path d="M6 16c.7-1.3 1.7-2 3-2s2.3.7 3 2M14.5 10h3M14.5 14h3" />
     </>
   ),
   security: <path d="M12 3 4.5 6v5.5c0 4.4 3 8 7.5 9.5 4.5-1.5 7.5-5.1 7.5-9.5V6z" />,
@@ -241,6 +260,18 @@ const Profile = () => {
   const [profileFieldErrors, setProfileFieldErrors] = useState<Record<string, string>>({})
   const [profileError, setProfileError] = useState<string | null>(null)
   const [profileSaving, setProfileSaving] = useState(false)
+  const [kyc, setKyc] = useState<KycProfile | null>(null)
+  const [kycLoading, setKycLoading] = useState(false)
+  const [kycError, setKycError] = useState<string | null>(null)
+  const [kycSubmitError, setKycSubmitError] = useState<string | null>(null)
+  const [kycSuccess, setKycSuccess] = useState<string | null>(null)
+  const [kycSubmitting, setKycSubmitting] = useState(false)
+  const [kycForm, setKycForm] = useState({
+    bvn: '',
+    fullName: '',
+    dateOfBirth: '',
+    phone: '',
+  })
   const [avatarBusy, setAvatarBusy] = useState(false)
   const [avatarError, setAvatarError] = useState<string | null>(null)
   const [devices, setDevices] = useState<Device[] | null>(null)
@@ -359,6 +390,50 @@ const Profile = () => {
       alive = false
     }
   }, [deviceReloadKey, navigate, view])
+
+  useEffect(() => {
+    if (view !== 'identity') return
+    let active = true
+
+    const loadKyc = async () => {
+      setKycLoading(true)
+      setKycError(null)
+      setKycSubmitError(null)
+      setKycSuccess(null)
+      try {
+        const res = await fetch('/api/auth/kyc', {
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        })
+        if (res.status === 401) {
+          navigate('/login', { replace: true })
+          return
+        }
+        const payload = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(payload.message ?? 'Could not load your BVN status.')
+
+        const profile = (payload?.data?.kyc ?? null) as KycProfile | null
+        if (!active) return
+        setKyc(profile)
+        setKycForm((previous) => ({
+          ...previous,
+          bvn: '',
+          fullName: profile?.fullName ?? user?.fullname ?? user?.name ?? '',
+          dateOfBirth: profile?.dateOfBirth ?? '',
+          phone: profile?.phone ?? user?.phone ?? '',
+        }))
+      } catch (err) {
+        if (active) setKycError(err instanceof Error ? err.message : 'Something went wrong.')
+      } finally {
+        if (active) setKycLoading(false)
+      }
+    }
+
+    void loadKyc()
+    return () => {
+      active = false
+    }
+  }, [navigate, user?.fullname, user?.name, user?.phone, view])
 
   useEffect(() => {
     if (view !== 'security') return
@@ -668,6 +743,7 @@ const Profile = () => {
     if (fullname.split(' ').filter(Boolean).length < 2) {
       clientErrors.fullname = 'Enter your first and last name.'
     }
+
     if (fullname.length > 120) {
       clientErrors.fullname = 'Name must be 120 characters or fewer.'
     }
@@ -726,6 +802,68 @@ const Profile = () => {
       setProfileError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
       setProfileSaving(false)
+    }
+  }
+
+  const handleKycSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setKycSubmitError(null)
+    setKycSuccess(null)
+    const bvn = kycForm.bvn.replace(/\s+/g, '')
+    const fullName = kycForm.fullName.trim().replace(/\s+/g, ' ')
+    const phone = kycForm.phone.trim()
+    if (!/^\d{11}$/.test(bvn)) {
+      setKycSubmitError('BVN must be exactly 11 digits.')
+      return
+    }
+    if (fullName.length < 2 || fullName.length > 180) {
+      setKycSubmitError('Enter your full name as registered with your BVN.')
+      return
+    }
+    if (!kycForm.dateOfBirth || !/^\d{4}-\d{2}-\d{2}$/.test(kycForm.dateOfBirth)) {
+      setKycSubmitError('Enter a valid date of birth.')
+      return
+    }
+    if (!/^\+?[0-9\s-]{7,20}$/.test(phone)) {
+      setKycSubmitError('Enter a valid phone number.')
+      return
+    }
+
+    setKycSubmitting(true)
+    try {
+      const res = await fetch('/api/auth/kyc', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          bvn,
+          full_name: fullName,
+          date_of_birth: kycForm.dateOfBirth,
+          phone,
+        }),
+      })
+      if (res.status === 401) {
+        navigate('/login', { replace: true })
+        return
+      }
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const firstError = Object.values(payload?.errors ?? {}).flat()[0]
+        throw new Error(
+          typeof firstError === 'string'
+            ? firstError
+            : payload.message ?? 'Could not submit your BVN.',
+        )
+      }
+      if (!payload?.data?.kyc) throw new Error('The server did not return your BVN review status.')
+      setKyc(payload.data.kyc as KycProfile)
+      setKycForm((previous) => ({ ...previous, bvn: '' }))
+      setKycSuccess(payload.message ?? 'BVN submitted for review.')
+      setActivityReloadKey((n) => n + 1)
+    } catch (err) {
+      setKycSubmitError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setKycSubmitting(false)
     }
   }
 
@@ -1139,6 +1277,17 @@ const Profile = () => {
                       <Icon name="chevron" />
                     </a>
 
+                    <a className="profile-tile" href="#identity">
+                      <span className="profile-tile-icon">
+                        <Icon name="identity" />
+                      </span>
+                      <span className="profile-tile-text">
+                        <strong>Identity verification</strong>
+                        <span>Submit your BVN for secure admin review.</span>
+                      </span>
+                      <Icon name="chevron" />
+                    </a>
+
                     <a className="profile-tile" href="#privacy">
                       <span className="profile-tile-icon">
                         <Icon name="privacy" />
@@ -1330,6 +1479,119 @@ const Profile = () => {
                     </dl>
                   )}
                 </section>
+              </>
+            )}
+
+            {view === 'identity' && (
+              <>
+                {pageHead(
+                  'Identity verification',
+                  'Submit your BVN and matching details for an administrator to review before they can be used for a virtual account.',
+                )}
+                {kycLoading ? (
+                  <section className="profile-card profile-device-state" role="status">
+                    Loading your BVN status…
+                  </section>
+                ) : kycError ? (
+                  <section className="profile-card profile-device-state" role="alert">
+                    {kycError}
+                  </section>
+                ) : (
+                  <div className="profile-stack">
+                    {kyc && (
+                      <section className="profile-card profile-card-pad">
+                        <div className="profile-card-title-row">
+                          <h2>Submission status</h2>
+                          <span className={`profile-chip ${kyc.status === 'verified' ? 'is-good' : 'is-warn'}`}>
+                            <Icon name={kyc.status === 'verified' ? 'check' : 'alert'} />
+                            {kyc.status === 'verified' ? 'Verified' : kyc.status === 'pending' ? 'In review' : 'Rejected'}
+                          </span>
+                        </div>
+                        <dl className="profile-rows">
+                          <div><dt>BVN</dt><dd>{kyc.bvnMasked}</dd></div>
+                          <div><dt>Submitted name</dt><dd>{kyc.fullName}</dd></div>
+                          <div><dt>Date of birth</dt><dd>{kyc.dateOfBirth}</dd></div>
+                          <div><dt>Phone</dt><dd>{kyc.phone}</dd></div>
+                        </dl>
+                        {kyc.status === 'pending' && (
+                          <p className="profile-empty-value">Your details are waiting for an administrator’s review.</p>
+                        )}
+                        {kyc.status === 'rejected' && kyc.rejectionReason && (
+                          <p role="alert" className="profile-empty-value">{kyc.rejectionReason}</p>
+                        )}
+                      </section>
+                    )}
+
+                    {kycSuccess && <p role="status" className="profile-card profile-card-pad">{kycSuccess}</p>}
+                    {kycSubmitError && (
+                      <p role="alert" className="profile-card profile-card-pad text-sm text-red-600">
+                        {kycSubmitError}
+                      </p>
+                    )}
+
+                    {(!kyc || kyc.status === 'rejected') && (
+                      <section className="profile-card profile-card-pad">
+                        <div className="profile-card-head">
+                          <h2>{kyc?.status === 'rejected' ? 'Resubmit your BVN' : 'Submit your BVN'}</h2>
+                          <p>Your BVN is encrypted at rest. The account page and admin review show only its last four digits.</p>
+                        </div>
+                        <form onSubmit={handleKycSubmit} noValidate className="profile-form">
+                          <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+                            BVN
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              autoComplete="off"
+                              maxLength={11}
+                              value={kycForm.bvn}
+                              onChange={(event) => setKycForm((previous) => ({ ...previous, bvn: event.target.value.replace(/\D/g, '').slice(0, 11) }))}
+                              className="rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                              placeholder="11-digit BVN"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+                            Full name as registered with your BVN
+                            <input
+                              type="text"
+                              autoComplete="name"
+                              value={kycForm.fullName}
+                              onChange={(event) => setKycForm((previous) => ({ ...previous, fullName: event.target.value }))}
+                              className="rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+                            Date of birth
+                            <input
+                              type="date"
+                              autoComplete="bday"
+                              value={kycForm.dateOfBirth}
+                              onChange={(event) => setKycForm((previous) => ({ ...previous, dateOfBirth: event.target.value }))}
+                              className="rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+                            Phone number
+                            <input
+                              type="tel"
+                              autoComplete="tel"
+                              value={kycForm.phone}
+                              onChange={(event) => setKycForm((previous) => ({ ...previous, phone: event.target.value }))}
+                              className="rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
+                              placeholder="+234…"
+                            />
+                          </label>
+                          <button
+                            type="submit"
+                            className="profile-button is-primary"
+                            disabled={kycSubmitting}
+                          >
+                            {kycSubmitting ? 'Submitting…' : 'Submit for admin review'}
+                          </button>
+                        </form>
+                      </section>
+                    )}
+                  </div>
+                )}
               </>
             )}
 
