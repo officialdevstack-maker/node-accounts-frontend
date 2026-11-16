@@ -816,8 +816,8 @@ const Profile = () => {
       setKycSubmitError('BVN must be exactly 11 digits.')
       return
     }
-    if (fullName.length < 2 || fullName.length > 180) {
-      setKycSubmitError('Enter your full name as registered with your BVN.')
+    if (fullName.split(' ').filter(Boolean).length < 2 || fullName.length > 180) {
+      setKycSubmitError('Enter your first and last names as registered with your BVN.')
       return
     }
     if (!kycForm.dateOfBirth || !/^\d{4}-\d{2}-\d{2}$/.test(kycForm.dateOfBirth)) {
