@@ -78,6 +78,9 @@ const EVENT_LABELS: Record<string, string> = {
   avatar_updated: 'Profile photo changed',
   avatar_removed: 'Profile photo removed',
   data_exported: 'Account data downloaded',
+  kyc_submitted: 'BVN submitted for review',
+  kyc_verified: 'BVN verification approved',
+  kyc_rejected: 'BVN verification rejected',
 }
 
 const THEME_KEY = 'profile-theme'
